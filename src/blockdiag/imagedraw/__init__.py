@@ -13,7 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import pkg_resources
+from importlib.metadata import entry_pointsw
 
 from blockdiag.utils.logging import warning
 
@@ -21,7 +21,7 @@ drawers = {}
 
 
 def init_imagedrawers(debug=False):
-    for drawer in pkg_resources.iter_entry_points('blockdiag_imagedrawers'):
+    for drawer in entry_points()['blockdiag_imagedrawers']:
         try:
             module = drawer.load()
             if hasattr(module, 'setup'):
