@@ -273,7 +273,10 @@ class ImageDrawExBase(base.ImageDraw):
     def textlinesize(self, string, font):
         ttfont = ttfont_for(font)
         if ttfont is None:
-            size = self.draw.textsize(string, font=None)
+            if hasattr(self.draw,"textbbox"):
+                size=self.draw.textbbox((0,0), string, font=None)[2:]
+            else:
+                size = self.draw.textsize(string, font=None)
 
             font_ratio = font.size * 1.0 / FontMap.BASE_FONTSIZE
             size = Size(int(size[0] * font_ratio),
