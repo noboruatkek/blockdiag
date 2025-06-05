@@ -13,7 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from pkg_resources import iter_entry_points
+from importlib.metadata import entry_points
 
 from blockdiag.utils.logging import warning
 
@@ -28,7 +28,8 @@ def load(plugins, diagram, **kwargs):
             warning('plugin "%s" is already loaded. ignored.', name)
             return
 
-        for ep in iter_entry_points('blockdiag_plugins', name):
+        for ep in filter(lambda ep,name=name: (ep.name == name), 
+                         entry_points()['blockdiag_plugins'] ):
             module = ep.load()
             loaded_plugins.append(name)
             if hasattr(module, 'setup'):
