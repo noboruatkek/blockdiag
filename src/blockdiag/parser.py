@@ -259,5 +259,8 @@ def parse_string(string):
 
 
 def parse_file(path):
-    code = io.open(path, 'r', encoding='utf-8-sig').read()
-    return parse_string(code)
+    #code = io.open(path, 'r', encoding='utf-8-sig').read()
+    #return parse_string(code)
+    with io.open(path, 'r', encoding='utf-8-sig') as stream:
+        code=stream.read()
+        return parse_string(code)
