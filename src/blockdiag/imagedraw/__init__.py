@@ -13,7 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from importlib.metadata import entry_pointsw
+from importlib.metadata import entry_points
 
 from blockdiag.utils.logging import warning
 
