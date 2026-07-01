@@ -3,6 +3,12 @@
 *.egg-info
 *.so
 *.swp
+*.pdf
+*.png
+*.svg
+./examples/*.pdf
+./examples/*.png
+./examples/*.svg
 
 .cache/
 .mypy_cache/
