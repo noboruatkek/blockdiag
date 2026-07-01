@@ -21,7 +21,7 @@ import blockdiag.builder
 import blockdiag.drawer
 import blockdiag.parser
 from blockdiag.utils.bootstrap import Application, Options
-
+from blockdiag.utils.logging import error, warning, info
 
 class BlockdiagOptions(Options):
     def build_parser(self):
@@ -35,9 +35,14 @@ class BlockdiagOptions(Options):
 class BlockdiagApp(Application):
     module = blockdiag
 
+    def run(self, args):
+        return super(BlockdiagApp, self).run(args)
+    
     def parse_options(self, args):
+        # info(f"{self.options}")
         self.options = BlockdiagOptions(self.module).parse(args)
 
+        
     def build_diagram(self, tree):
         if not self.options.separate:
             return super(BlockdiagApp, self).build_diagram(tree)
@@ -57,7 +62,6 @@ class BlockdiagApp(Application):
                 draw.save()
 
             return 0
-
 
 def main(args=sys.argv[1:]):
     return BlockdiagApp().run(args)
