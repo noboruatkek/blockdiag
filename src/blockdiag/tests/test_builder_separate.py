@@ -35,7 +35,7 @@ class TestBuilderSeparated(BuilderTestCase):
         for i, diagram in enumerate(diagram):
             for node in diagram.traverse_nodes():
                 if isinstance(node, DiagramNode):
-                    print(node)
+                    # print(node)
                     self.assertEqual(assert_pos[i][node.id], node.xy)
 
     def test_separate2_diagram(self):
@@ -51,5 +51,5 @@ class TestBuilderSeparated(BuilderTestCase):
         for i, diagram in enumerate(diagram):
             for node in diagram.traverse_nodes():
                 if isinstance(node, DiagramNode):
-                    print(node)
+                    #print(node)
                     self.assertEqual(assert_pos[i][node.id], node.xy)
