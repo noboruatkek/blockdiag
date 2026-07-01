@@ -13,151 +13,354 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+from __future__ import division
+
 import math
 import re
 
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
+from functools import partial, wraps
+from itertools import tee
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from blockdiag.imagedraw import base
 from blockdiag.imagedraw.utils import memoize
-from blockdiag.utils import Box, Size, images
-from blockdiag.utils.fontmap import parse_fontpath
+from blockdiag.imagedraw.utils.ellipse import dots as ellipse_dots
+
+from blockdiag.utils.logging import error,warning,info
+
+from blockdiag.utils import XY, Box, Size, images
+from blockdiag.utils.fontmap import FontMap, parse_fontpath
+from blockdiag.utils.myitertools import istep, stepslice
+
+def point_pairs(xylist):
+    iterable = iter(xylist)
+    for pt in iterable:
+        if isinstance(pt, int):
+            yield (pt, next(iterable))
+        else:
+            yield pt
 
 
-class PDFImageDraw(base.ImageDraw):
-    baseline_text_rendering = True
+def line_segments(xylist):
+    p1, p2 = tee(point_pairs(xylist))
+    next(p2)
+    return zip(p1, p2)
 
+
+def dashize_line(line, length):
+    pt1, pt2 = line
+    if pt1[0] == pt2[0]:  # holizonal
+        if pt1[1] > pt2[1]:
+            pt2, pt1 = line
+
+        r = stepslice(range(round(pt1[1]), round(pt2[1])), length)
+        for y1, y2 in istep(n for n in r):
+            yield [(pt1[0], y1), (pt1[0], y2)]
+
+    elif pt1[1] == pt2[1]:  # vertical
+        if pt1[0] > pt2[0]:
+            pt2, pt1 = line
+
+        r = stepslice(range(round(pt1[0]), round(pt2[0])), length)
+        for x1, x2 in istep(n for n in r):
+            yield [(x1, pt1[1]), (x2, pt1[1])]
+    else:  # diagonal
+        if pt1[0] > pt2[0]:
+            pt2, pt1 = line
+
+        # DDA (Digital Differential Analyzer) Algorithm
+        locus = []
+        m = float(pt2[1] - pt1[1]) / float(pt2[0] - pt1[0])
+        x = pt1[0]
+        y = pt1[1]
+
+        while x <= pt2[0]:
+            locus.append((int(x), int(round(y))))
+            x += 1
+            y += m
+
+        for p1, p2 in istep(stepslice(locus, length)):
+            yield (p1, p2)
+
+
+def style2cycle(style, thick):
+    if thick is None:
+        thick = 1
+
+    if style == 'dotted':
+        length = [2 * thick, 2 * thick]
+    elif style == 'dashed':
+        length = [4 * thick, 4 * thick]
+    elif style == 'none':
+        length = [0, 65535 * thick]
+    elif re.search(r'^\d+(,\d+)*$', style or ""):
+        length = [int(n) * thick for n in style.split(',')]
+    else:
+        length = None
+
+    return length
+
+
+def ttfont_for(font):
+    if font.path:
+        path, index = parse_fontpath(font.path)
+        if index:
+            ttfont = ImageFont.truetype(path, font.size, index=index)
+        else:
+            ttfont = ImageFont.truetype(path, font.size)
+    else:
+        ttfont = None
+
+    return ttfont
+
+
+class ImageDrawExBase(base.ImageDraw):
     def __init__(self, filename, **kwargs):
         self.filename = filename
-        self.canvas = None
-        self.fonts = {}
+        self.transparency = kwargs.get('transparency')
+        self.bgcolor = kwargs.get('color', (256, 256, 256))
+        self._image = None
+        self.draw = None
+
+        if kwargs.get('parent'):
+            self.scale_ratio = kwargs.get('parent').scale_ratio
+        else:
+            self.scale_ratio = kwargs.get('scale_ratio', 1)
 
         self.set_canvas_size(Size(1, 1))  # This line make textsize() workable
 
+    def paste(self, image, pt, mask=None):
+        self._image.paste(image, pt, mask)
+        self.draw = ImageDraw.Draw(self._image)
+
     def set_canvas_size(self, size):
-        self.canvas = canvas.Canvas(self.filename, pagesize=size)
-        self.size = size
-
-    def set_font(self, font):
-        if font.path is None:
-            msg = "Could not detect fonts, use --font opiton\n"
-            raise RuntimeError(msg)
-
-        if font.path not in self.fonts:
-            path, index = parse_fontpath(font.path)
-            if index:
-                ttfont = TTFont(font.path, path, subfontIndex=index)
-            else:
-                ttfont = TTFont(font.path, path)
-            pdfmetrics.registerFont(ttfont)
-
-            self.fonts[font.path] = ttfont
-
-        self.canvas.setFont(font.path, font.size)
-
-    def set_render_params(self, **kwargs):
-        self.set_stroke_color(kwargs.get('outline'))
-        self.set_fill_color(kwargs.get('fill', 'none'))
-        self.set_style(kwargs.get('style'), kwargs.get('thick'))
-
-        params = {}
-        if kwargs.get('fill', 'none') == 'none':
-            params['fill'] = 0
+        if self.transparency:
+            mode = 'RGBA'
         else:
-            params['fill'] = 1
+            mode = 'RGB'
 
-        if kwargs.get('outline') is None:
-            params['stroke'] = 0
+        self._image = Image.new(mode, size, self.bgcolor)
+
+        # set transparency to background
+        if self.transparency:
+            alpha = Image.new('L', size, 1)
+            self._image.putalpha(alpha)
+
+        self.draw = ImageDraw.Draw(self._image)
+
+    def resizeCanvas(self, size):
+        #self._image = self._image.resize(size, Image.ANTIALIAS)
+        self._image = self._image.resize(size, Image.BICUBIC)
+        self.draw = ImageDraw.Draw(self._image)
+
+    def arc(self, box, start, end, **kwargs):
+        style = kwargs.get('style')
+        if 'style' in kwargs:
+            del kwargs['style']
+        if 'thick' in kwargs:
+            del kwargs['thick']
+
+        if style:
+            while start > end:
+                end += 360
+
+            cycle = style2cycle(style, kwargs.get('width'))
+            for pt in ellipse_dots(box, cycle, start, end):
+                self.draw.line([pt, pt], fill=kwargs['fill'])
         else:
-            params['stroke'] = 1
+            self.draw.arc(box.to_integer_point(), start, end, **kwargs)
 
-        return params
+    def ellipse(self, box, **kwargs):
+        if 'filter' in kwargs:
+            del kwargs['filter']
 
-    def set_style(self, style, thick):
-        if thick is None:
-            thick = 1
+        style = kwargs.get('style')
+        if 'style' in kwargs:
+            del kwargs['style']
 
-        if style == 'dotted':
-            self.canvas.setDash([2 * thick, 2 * thick])
-        elif style == 'dashed':
-            self.canvas.setDash([4 * thick, 4 * thick])
-        elif style == 'none':
-            self.canvas.setDash([0, 65535 * thick])
-        elif re.search(r'^\d+(,\d+)*$', style or ""):
-            self.canvas.setDash([int(n) * thick for n in style.split(',')])
+        if style:
+            if kwargs.get('fill') != 'none':
+                kwargs2 = dict(kwargs)
+                if 'outline' in kwargs2:
+                    del kwargs2['outline']
+                self.draw.ellipse(box, **kwargs2)
+
+            if 'outline' in kwargs:
+                kwargs['fill'] = kwargs['outline']
+                del kwargs['outline']
+
+            cycle = style2cycle(style, kwargs.get('width'))
+            for pt in ellipse_dots(box, cycle):
+                self.draw.line([pt, pt], fill=kwargs['fill'])
         else:
-            self.canvas.setDash()
+            if kwargs.get('fill') == 'none':
+                del kwargs['fill']
 
-    def set_stroke_color(self, color="black"):
-        if isinstance(color, str):
-            self.canvas.setStrokeColor(color)
-        elif color:
-            rgb = (color[0] / 256.0, color[1] / 256.0, color[2] / 256.0)
-            self.canvas.setStrokeColorRGB(*rgb)
+            self.draw.ellipse(box.to_integer_point(), **kwargs)
+
+    def line(self, xy, **kwargs):
+        if 'jump' in kwargs:
+            del kwargs['jump']
+        if 'thick' in kwargs:
+            if kwargs['thick'] is not None:
+                kwargs['width'] = kwargs['thick']
+            del kwargs['thick']
+
+        style = kwargs.get('style')
+        if kwargs.get('fill') == 'none':
+            pass
+        elif (style in ('dotted', 'dashed', 'none') or
+              re.search(r'^\d+(,\d+)*$', style or "")):
+            self.dashed_line(xy, **kwargs)
         else:
-            self.set_stroke_color()
+            if 'style' in kwargs:
+                del kwargs['style']
 
-    def set_fill_color(self, color="white"):
-        if isinstance(color, str):
-            if color != 'none':
-                self.canvas.setFillColor(color)
-        elif color:
-            rgb = (color[0] / 256.0, color[1] / 256.0, color[2] / 256.0)
-            self.canvas.setFillColorRGB(*rgb)
-        else:
-            self.set_fill_color()
+            self.draw.line(xy, **kwargs)
 
-    def path(self, pd, **kwargs):
-        params = self.set_render_params(**kwargs)
-        self.canvas.drawPath(pd, **params)
+    def dashed_line(self, xy, **kwargs):
+        style = kwargs.get('style')
+        del kwargs['style']
+
+        cycle = style2cycle(style, kwargs.get('width'))
+        for line in line_segments(xy):
+            for subline in dashize_line(line, cycle):
+                self.line(subline, **kwargs)
 
     def rectangle(self, box, **kwargs):
-        x = box[0]
-        y = self.size[1] - box[3]
-        width = box[2] - box[0]
-        height = box[3] - box[1]
+        thick = kwargs.get('thick', self.scale_ratio)
+        fill = kwargs.get('fill')
+        outline = kwargs.get('outline')
+        style = kwargs.get('style')
 
-        if 'thick' in kwargs and kwargs['thick'] is not None:
-            self.canvas.setLineWidth(kwargs['thick'])
+        if thick == 1:
+            d = 0
+        else:
+            d = int(math.ceil(thick / 2.0))
 
-        params = self.set_render_params(**kwargs)
-        self.canvas.rect(x, y, width, height, **params)
+        if fill and fill != 'none':
+            self.draw.rectangle(box, fill=fill)
 
-        if 'thick' in kwargs:
-            self.canvas.setLineWidth(1)
+        x1, y1, x2, y2 = box
+        lines = (((x1, y1), (x2, y1)), ((x1, y2), (x2, y2)),  # horizonal
+                 ((x1, y1 - d), (x1, y2 + d)),  # vettical (left)
+                 ((x2, y1 - d), (x2, y2 + d)))  # vertical (right)
+
+        for line in lines:
+            self.line(line, fill=outline, width=thick, style=style)
+
+    def polygon(self, xy, **kwargs):
+        if 'filter' in kwargs:
+            del kwargs['filter']
+
+        if kwargs.get('fill') != 'none':
+            kwargs2 = dict(kwargs)
+
+            if 'style' in kwargs2:
+                del kwargs2['style']
+            if 'outline' in kwargs2:
+                del kwargs2['outline']
+            self.draw.polygon(xy, **kwargs2)
+
+        if kwargs.get('outline'):
+            kwargs['fill'] = kwargs['outline']
+            del kwargs['outline']
+            self.line(xy, **kwargs)
+
+    @property
+    def textfolder(self):
+        textfolder = super(ImageDrawExBase, self).textfolder
+        return partial(textfolder, scale=self.scale_ratio)
 
     @memoize
     def textlinesize(self, string, font):
-        self.set_font(font)
-        width = self.canvas.stringWidth(string, font.path, font.size)
-        return Size(int(math.ceil(width)), font.size)
+        ttfont = ttfont_for(font)
+        #info(f"{font.path=} {font.name=} {string=}")
+        
+        if ttfont is None:
+            if hasattr(self.draw,"textbbox"):
+                size=self.draw.textbbox((0,0), string, font=None)[2:]
+            else:
+                size = self.draw.textsize(string, font=None)
+
+            font_ratio = font.size * 1.0 / FontMap.BASE_FONTSIZE
+            size = Size(int(size[0] * font_ratio),
+                        int(size[1] * font_ratio))
+        else:
+            #info(f"{ttfont.getbbox(string)=} {ttfont.getlength(string)=} {ttfont.getmetrics()}")            
+            #size = Size(*ttfont.getsize(string))#Size(width,height)
+            l,b,r,t=ttfont.getbbox(string)
+            size = Size(r-l,t-b) #Size(width,height)
+            # size = Size( ttfont.getlength(string),
+            #              ttfont.getmetrics()[0]
+            #             )
+        return size
 
     def text(self, xy, string, font, **kwargs):
-        self.set_font(font)
-        self.set_fill_color(kwargs.get('fill'))
-        self.canvas.drawString(xy[0], self.size[1] - xy[1], string)
+        fill = kwargs.get('fill')
+        ttfont = ttfont_for(font)
+
+        if ttfont is None:
+            if self.scale_ratio == 1 and font.size == FontMap.BASE_FONTSIZE:
+                self.draw.text(xy, string, fill=fill)
+            else:
+                size = self.draw.textsize(string)
+                image = Image.new('RGBA', size)
+                draw = ImageDraw.Draw(image)
+                draw.text((0, 0), string, fill=fill)
+                del draw
+
+                basesize = (size[0] * self.scale_ratio,
+                            size[1] * self.scale_ratio)
+                #text_image = image.resize(basesize, Image.ANTIALIAS)
+                text_image = image.resize(basesize, Image.BICUBIC)
+                self.paste(text_image, xy, text_image)
+        else:
+            #size = ttfont.getsize(string)
+            l,b,r,t=ttfont.getbbox(string)
+            size = Size(r-l,t-b)
+            #info(f"{ttfont.getbbox(string)=}")
+            
+            # Generate mask to support BDF(bitmap font)
+            mask = Image.new('1', size)
+            draw = ImageDraw.Draw(mask)
+            draw.text((0, 0), string, fill='white', font=ttfont)
+
+            # Rendering text
+            filler = Image.new('RGB', size, fill)
+            self.paste(filler, xy, mask)
 
     def textarea(self, box, string, font, **kwargs):
-        self.canvas.saveState()
-
         if 'rotate' in kwargs and kwargs['rotate'] != 0:
             angle = 360 - int(kwargs['rotate']) % 360
-            self.canvas.rotate(angle)
+            del kwargs['rotate']
 
-            if angle == 90:
-                box = Box(-box.y2, box.x1, -box.y1, box.x1 + box.width)
-                box = box.shift(x=self.size.height, y=self.size.height)
-            elif angle == 180:
-                box = Box(-box.x2, -box.y2, -box.x1, -box.y2 + box.height)
-                box = box.shift(y=self.size.height * 2)
-            elif angle == 270:
-                box = Box(box.y1, -box.x2, box.y2, -box.x1)
-                box = box.shift(x=-self.size.height, y=self.size.height)
+            if angle in (90, 270):
+                _box = Box(0, 0, box.height, box.width)
+            else:
+                _box = box
 
-        self.set_font(font)
+            text = ImageDrawEx(None, parent=self, transparency=True)
+            text.set_canvas_size(_box.size)
+            textbox = Box(0, 0, _box.width, _box.height)
+            text.textarea(textbox, string, font, **kwargs)
+
+            filler = Image.new('RGB', box.size, kwargs.get('fill'))
+
+            mask = text._image.rotate(angle, expand=True)
+            if mask.size != filler.size:
+                # Image.rotate(expand=True) of Pillow earlier than
+                # 3.3.0 (including 2.x) returns image object with
+                # unexpected size: for example, rotating 10x20 by 270
+                # causes not 20x10 but 21x11.
+                # Therefore, crop rotated image in order to make it
+                # match against size of "filler".
+                mask = mask.crop((0, 0, box.width, box.height))
+
+            self.paste(filler, box.topleft, mask)
+            return
+
         lines = self.textfolder(box, string, font, **kwargs)
 
         if kwargs.get('outline'):
@@ -168,73 +371,135 @@ class PDFImageDraw(base.ImageDraw):
         for string, xy in lines.lines:
             self.text(xy, string, font, **kwargs)
             rendered = True
-        self.canvas.restoreState()
 
         if not rendered and font.size > 0:
-            font.size = int(font.size * 0.8)
-            self.textarea(box, string, font, **kwargs)
-
-    def line(self, xy, **kwargs):
-        self.set_stroke_color(kwargs.get('fill', 'none'))
-        self.set_style(kwargs.get('style'), kwargs.get('thick'))
-
-        if 'thick' in kwargs and kwargs['thick'] is not None:
-            self.canvas.setLineWidth(kwargs['thick'])
-
-        p1 = xy[0]
-        y = self.size[1]
-        for p2 in xy[1:]:
-            self.canvas.line(p1.x, y - p1.y, p2.x, y - p2.y)
-            p1 = p2
-
-        if 'thick' in kwargs:
-            self.canvas.setLineWidth(1)
-
-    def arc(self, xy, start, end, **kwargs):
-        start, end = 360 - end, 360 - start
-        r = (360 + end - start) % 360
-
-        self.set_render_params(**kwargs)
-        y = self.size[1]
-        self.canvas.arc(xy[0], y - xy[3], xy[2], y - xy[1], start, r)
-
-    def ellipse(self, xy, **kwargs):
-        params = self.set_render_params(**kwargs)
-        y = self.size[1]
-        self.canvas.ellipse(xy[0], y - xy[3], xy[2], y - xy[1], **params)
-
-    def polygon(self, xy, **kwargs):
-        pd = self.canvas.beginPath()
-        y = self.size[1]
-        pd.moveTo(xy[0][0], y - xy[0][1])
-        for p in xy[1:]:
-            pd.lineTo(p[0], y - p[1])
-
-        params = self.set_render_params(**kwargs)
-        self.canvas.drawPath(pd, **params)
+            _font = font.duplicate()
+            _font.size = int(font.size * 0.8)
+            self.textarea(box, string, _font, **kwargs)
 
     def image(self, box, url):
+        if not box.width or not box.height:
+            # resizing image into "0 width and/or height" is meaningless
+            return
+
         try:
             image = images.open(url, mode='pillow')
-            if image.mode not in ('RGBA', 'L', 'RGB', 'CYMYK'):
-                # convert to format that reportlab can recognize
+
+            # resize image.
+            w = min([box.width, image.size[0] * self.scale_ratio])
+            h = min([box.height, image.size[1] * self.scale_ratio])
+            #image.thumbnail((w, h), Image.ANTIALIAS)
+            image.thumbnail((w, h), Image.BICUBIC)
+
+            # centering image.
+            w, h = image.size
+            if box.width > w:
+                x = box[0] + (box.width - w) // 2
+            else:
+                x = box[0]
+
+            if box.height > h:
+                y = box[1] + (box.height - h) // 2
+            else:
+                y = box[1]
+
+            if image.mode == 'P':
+                # convert P to RGBA to masking transparent pixels
                 image = image.convert('RGBA')
 
-            y = self.size[1] - box[3]
-            data = ImageReader(image)
-            self.canvas.drawImage(data, box.x1, y, box.width, box.height,
-                                  mask='auto', preserveAspectRatio=True)
+            if image.mode == 'RGBA':
+                self.paste(image, (round(x), round(y)), mask=image)
+            else:
+                self.paste(image, (round(x), round(y)))
         except IOError:
             pass
 
     def save(self, filename, size, _format):
-        # Ignore size and format parameter; compatibility for ImageDrawEx.
+        if filename:
+            self.filename = filename
 
-        self.canvas.showPage()
-        self.canvas.save()
+        if size is None:
+            x = int(self._image.size[0] / self.scale_ratio)
+            y = int(self._image.size[1] / self.scale_ratio)
+            size = (x, y)
+
+        # self._image.thumbnail(size, Image.ANTIALIAS)
+        self._image.thumbnail(size, Image.BICUBIC)
+
+        if self.filename:
+            self._image.save(self.filename, _format)
+            image = None
+        else:
+            from io import BytesIO
+            tmp = BytesIO()
+            self._image.save(tmp, _format)
+            image = tmp.getvalue()
+
+        return image
 
 
+def blurred(fn):
+    PADDING = 16
+
+    def get_shape_box(*args):
+        if fn.__name__ == 'polygon':
+            xlist = [pt.x for pt in args[0]]
+            ylist = [pt.y for pt in args[0]]
+            return Box(min(xlist), min(ylist), max(xlist), max(ylist))
+        else:
+            return args[0]
+
+    def get_abs_coordinate(box, *args):
+        dx = box.x1 - PADDING
+        dy = box.y1 - PADDING
+        if fn.__name__ == 'polygon':
+            return [pt.shift(-dx, -dy) for pt in args[0]]
+        else:
+            return box.shift(-dx, -dy)
+
+    def create_shadow(self, size, *args, **kwargs):
+        drawer = ImageDrawExBase(self.filename, transparency=True)
+        drawer.set_canvas_size(size)
+        getattr(drawer, fn.__name__)(*args, **kwargs)
+
+        for _ in range(15):
+            drawer._image = drawer._image.filter(ImageFilter.SMOOTH_MORE)
+
+        return drawer._image
+
+    @wraps(fn)
+    def func(self, *args, **kwargs):
+        args = list(args)
+
+        if kwargs.get('filter') not in ('blur', 'transp-blur'):
+            return fn(self, *args, **kwargs)
+        else:
+            box = get_shape_box(*args)
+            args[0] = get_abs_coordinate(box, *args)
+
+            size = Size(box.width + PADDING * 2, box.height + PADDING * 2)
+            shadow = create_shadow(self, size, *args, **kwargs)
+            xy = XY(box.x1 - PADDING, box.y1 - PADDING)
+            self.paste(shadow, xy, shadow)
+
+    return func
+
+
+class ImageDrawEx(ImageDrawExBase):
+    @blurred
+    def ellipse(self, box, **kwargs):
+        super(ImageDrawEx, self).ellipse(box, **kwargs)
+
+    @blurred
+    def rectangle(self, box, **kwargs):
+        super(ImageDrawEx, self).rectangle(box, **kwargs)
+
+    @blurred
+    def polygon(self, xy, **kwargs):
+        super(ImageDrawEx, self).polygon(xy, **kwargs)
+
+# 
 def setup(self):
     from blockdiag.imagedraw import install_imagedrawer
-    install_imagedrawer('pdf', PDFImageDraw)
-    install_imagedrawer('PDF', PDFImageDraw)
+    install_imagedrawer('png', ImageDrawEx)
+    install_imagedrawer('PNG', ImageDrawEx)
