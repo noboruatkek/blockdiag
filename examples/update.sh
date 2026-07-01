@@ -12,4 +12,8 @@ do
     svg=$EXAMPLES/`basename $diag .diag`.svg
     echo $BLOCKDIAG -Tsvg -o $svg $diag
     $BLOCKDIAG -Tsvg -o $svg $diag
+
+    pdf=$EXAMPLES/`basename $diag .diag`.pdf
+    echo $BLOCKDIAG -Tpdf -o $pdf $diag
+    $BLOCKDIAG -Tpdf -o $pdf $diag
 done
