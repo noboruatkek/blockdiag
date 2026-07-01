@@ -80,7 +80,7 @@ def wand_open(url, stream):
     try:
         import wand.image
     except Exception:
-        warning("unknown image type: %s", url)
+        warning("unknown image type: {}", url)
         raise IOError
 
     try:
@@ -91,7 +91,7 @@ def wand_open(url, stream):
             png_image.seek(0)
             return png_image
     except Exception as exc:
-        warning("Fail to convert %s to PNG: %r", url, exc)
+        warning(f"Fail to convert {url} to PNG: {exc!r}")
         raise IOError
 
 
@@ -118,7 +118,7 @@ def open(url, mode='Pillow'):
             # wrap BytesIO for rewind stream
             stream = io.BytesIO(urlopen(url).read())
         except Exception:
-            warning("Could not retrieve: %s", url)
+            warning("Could not retrieve: {}", url)
             raise IOError
 
     image = pillow_open(url, stream)
@@ -132,7 +132,7 @@ def open(url, mode='Pillow'):
             if hasattr(stream, 'close'):  # close() is implemented on Pillow
                 stream.close()
         except Exception:
-            warning("Could not convert image: %s", url)
+            warning("Could not convert image: {}", url)
             raise IOError
 
         png_image.seek(0)
