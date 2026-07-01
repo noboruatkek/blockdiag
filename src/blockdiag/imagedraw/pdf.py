@@ -237,3 +237,4 @@ class PDFImageDraw(base.ImageDraw):
 def setup(self):
     from blockdiag.imagedraw import install_imagedrawer
     install_imagedrawer('pdf', PDFImageDraw)
+    install_imagedrawer('PDF', PDFImageDraw)
