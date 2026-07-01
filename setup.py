@@ -7,11 +7,13 @@ from setuptools import find_packages, setup
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: Apache Software License",
+    #"License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
+    #"Programming Language :: Python :: 3.7",
+    #"Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
     "Topic :: Software Development :: Documentation",
     "Topic :: Text Processing :: Markup",
@@ -46,11 +48,11 @@ setup(
         "Code": "https://github.com/blockdiag/blockdiag",
         "Issue tracker": "https://github.com/blockdiag/blockdiag/issues",
     },
-    license='Apache License 2.0',
-    packages=find_packages('src'),
-    package_dir={'': 'src'},
+    #license='Apache License 2.0',
+    packages=find_packages(where='src',),
+    package_dir={'': 'src', } ,
     include_package_data=True,
-    python_requires=">=3.7",
+    python_requires=">=3.10",
     install_requires=[
         'setuptools',
         'funcparserlib>=1.0.0a0',
@@ -60,6 +62,10 @@ setup(
     extras_require={
         'pdf': [
             'reportlab'
+        ],
+        'png': [
+            'wand',
+            'imagemagick'
         ],
         'rst': [
             'docutils'
