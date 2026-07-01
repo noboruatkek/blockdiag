@@ -319,3 +319,4 @@ class SVGImageDraw(SVGImageDrawElement):
 def setup(self):
     from blockdiag.imagedraw import install_imagedrawer
     install_imagedrawer('svg', SVGImageDraw)
+    install_imagedrawer('SVG', SVGImageDraw)
