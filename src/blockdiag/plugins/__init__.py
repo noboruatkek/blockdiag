@@ -15,7 +15,7 @@
 
 from importlib.metadata import entry_points
 
-from blockdiag.utils.logging import warning
+from blockdiag.utils.logging import warning,info
 
 loaded_plugins = []
 node_handlers = []
@@ -25,11 +25,10 @@ general_handlers = {}
 def load(plugins, diagram, **kwargs):
     for name in plugins:
         if name in loaded_plugins:
-            warning('plugin "%s" is already loaded. ignored.', name)
+            warning('plugin "{}" is already loaded. ignored.', name)
             return
 
-        for ep in filter(lambda ep,name=name: (ep.name == name), 
-                         entry_points()['blockdiag_plugins'] ):
+        for ep in  entry_points().select(group ='blockdiag_plugins', name = name):
             module = ep.load()
             loaded_plugins.append(name)
             if hasattr(module, 'setup'):
@@ -38,7 +37,6 @@ def load(plugins, diagram, **kwargs):
         else:
             msg = "unknown plugin: %s" % name
             raise AttributeError(msg)
-
 
 def install_general_handler(name, handler):
     if name not in general_handlers:
