@@ -22,11 +22,10 @@ searchpath = []
 
 
 def init_renderers():
-    for plugin in importlib.metadata.entry_points['blockdiag_noderenderer']:
+    for plugin in importlib.metadata.entry_points().select(group ='blockdiag_noderenderer'):
         module = plugin.load()
         if hasattr(module, 'setup'):
             module.setup(module)
-
 
 def install_renderer(name, renderer):
     renderers[name] = renderer
