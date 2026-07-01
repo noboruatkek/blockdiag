@@ -15,33 +15,39 @@
 
 from importlib.metadata import entry_points
 
-from blockdiag.utils.logging import warning
+from blockdiag.utils.logging import warning,info,error
 
 drawers = {}
 
-
 def init_imagedrawers(debug=False):
-    for drawer in entry_points()['blockdiag_imagedrawers']:
+    for drawer in entry_points().select(group = 'blockdiag_imagedrawers'):
+        if debug:
+            info(f"initialize drawer {drawer}")
         try:
-            module = drawer.load()
-            if hasattr(module, 'setup'):
-                module.setup(module)
-        except Exception as exc:
+            drawer_module = drawer.load()
+            if hasattr(drawer_module, 'setup'):
+                drawer_module.setup(drawer_module)
             if debug:
-                warning('Failed to load %s: %r' % (drawer.module_name, exc))
-
+                info(f"initialized drawer {drawer}" )
+        except Exception as exc:
+            print(exc)
+            if debug:
+                warning(f'Failed to load {drawer.module!s} {exc}')
 
 def install_imagedrawer(ext, drawer):
-    drawers[ext] = drawer
-
+    drawers[ ext ] = drawer
+    # info(f"installing drawer {drawer!r}  for {ext} ")
 
 def create(_format, filename, **kwargs):
+    
     if len(drawers) == 0:
         init_imagedrawers(debug=kwargs.get('debug'))
 
     _format = _format.lower()
+    
     if _format in drawers:
         drawer = drawers[_format](filename, **kwargs)
+        # info(f"loaded drawer {drawer!r} for format {_format}")
     else:
         msg = 'failed to load %s image driver' % _format
         raise RuntimeError(msg)
