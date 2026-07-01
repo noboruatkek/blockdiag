@@ -15,14 +15,23 @@
 
 import sys
 
-
-def warning(msg, *args):
-    sys.stderr.write("WARNING: ")
-    sys.stderr.write(msg % args)
+def showMsg(msg_or_fmt, / , *args, msgclass, **env):
+    sys.stderr.write(msgclass)
+    sys.stderr.write(msg_or_fmt.format(*args, **env))
     sys.stderr.write("\n")
+    
+def debug(msg_or_fmt, *args, **env):
+    showMsg(msg_or_fmt, *args, msgclass="DEBUG: ", **env)
 
+def info(msg_or_fmt, *args, **env):
+    showMsg(msg_or_fmt, *args, msgclass="INFO: ", **env)
 
-def error(msg, *args):
-    sys.stderr.write("ERROR: ")
-    sys.stderr.write(msg % args)
-    sys.stderr.write("\n")
+def warning(msg_or_fmt, *args, **env): 
+    showMsg(msg_or_fmt, *args, msgclass="WARNING: ", **env)
+
+def error(msg_or_fmt, *args, **env):
+    showMsg(msg_or_fmt, *args, msgclass="ERROR: ", **env)
+
+def fatal(msg_or_fmt, *args, **env):
+    showMsg(msg_or_fmt, *args, msgclass="FATAL: ", **env)
+    
