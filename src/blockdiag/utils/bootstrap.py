@@ -24,7 +24,7 @@ from blockdiag import imagedraw, plugins
 from blockdiag.utils import images
 from blockdiag.utils.config import ConfigParser
 from blockdiag.utils.fontmap import FontMap, parse_fontpath
-from blockdiag.utils.logging import error, warning
+from blockdiag.utils.logging import error, warning, info
 
 
 class Application(object):
@@ -68,7 +68,7 @@ class Application(object):
 
     def parse_options(self, args):
         self.options = Options(self.module).parse(args)
-
+        
     def create_fontmap(self):
         self.fontmap = create_fontmap(self.options)
 
@@ -88,6 +88,8 @@ class Application(object):
         return self.module.parser.parse_string(self.code)
 
     def build_diagram(self, tree):
+        # info("building diagram")
+        
         ScreenNodeBuilder = self.module.builder.ScreenNodeBuilder
         try:
             diagram = ScreenNodeBuilder.build(tree, self.options)
@@ -129,6 +131,7 @@ class Options(object):
         self.validate()
         self.read_configfile()
 
+        # info(self.options)
         return self.options
 
     def build_parser(self):
@@ -159,7 +162,6 @@ class Options(object):
                      help='Output diagram as TYPE format')
         p.add_option('--nodoctype', action='store_true',
                      help='Do not output doctype definition tags (SVG only)')
-
         return p
 
     def validate(self):
@@ -181,7 +183,8 @@ class Options(object):
         try:
             imagedraw.create(self.options.type, None, debug=self.options.debug)
         except Exception:
-            msg = "unknown format: %s" % self.options.type
+            #msg = "unknown format: %s" % self.options.type
+            msg = f"Unknown Format: {self.options.type:s}"
             raise RuntimeError(msg)
 
         if self.options.size:
