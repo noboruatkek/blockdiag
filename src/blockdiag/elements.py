@@ -205,13 +205,13 @@ class DiagramNode(Element):
         if urlutil.isurl(value) or os.path.isfile(value):
             self.icon = value
         else:
-            warning("icon image not found: %s", value)
+            warning("icon image not found: {}", value)
 
     def set_background(self, value):
         if urlutil.isurl(value) or os.path.isfile(value):
             self.background = value
         else:
-            warning("background image not found: %s", value)
+            warning("background image not found: {}", value)
 
     def set_stacked(self, _):
         self.stacked = True
@@ -660,3 +660,4 @@ class Diagram(NodeGroup):
     def set_fontsize(self, value):
         warning("fontsize is obsoleted; use default_fontsize")
         self.set_default_fontsize(int(value))
+        
