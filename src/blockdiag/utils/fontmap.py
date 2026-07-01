@@ -146,7 +146,7 @@ class FontMap(object):
             font = FontInfo(fontfamily, path, self.fontsize)
             self.fonts[font.familyname] = font
         else:
-            warning('fontfile `%s` is not found: %s', fontfamily, path)
+            warning('fontfile `{}` is not found: {}', fontfamily, path)
 
     def _regulate_familyname(self, name):
         return FontInfo(name, None, self.BASE_FONTSIZE).familyname.lower()
@@ -162,7 +162,7 @@ class FontMap(object):
             font = self.fonts[name].duplicate()
             font.size = fontsize
         elif element is not None:
-            warning("Unknown fontfamily: %s", fontfamily)
+            warning("Unknown fontfamily: {}", fontfamily)
             elem = namedtuple('Font', 'fontsize')(fontsize)
             font = self.find(elem)
         else:
