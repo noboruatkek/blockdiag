@@ -1,6 +1,10 @@
 Changelog
 =========
 
+3.0.1-dev1(2026-06-30)
+----------------------
+pkg_resources -> importlib.metadata
+
 3.0.0 (2021-12-06)
 ------------------
 * Drop python3.6 support
