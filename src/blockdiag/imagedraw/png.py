@@ -17,6 +17,7 @@ from __future__ import division
 
 import math
 import re
+
 from functools import partial, wraps
 from itertools import tee
 
@@ -25,10 +26,12 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from blockdiag.imagedraw import base
 from blockdiag.imagedraw.utils import memoize
 from blockdiag.imagedraw.utils.ellipse import dots as ellipse_dots
+
+from blockdiag.utils.logging import error,warning,info
+
 from blockdiag.utils import XY, Box, Size, images
 from blockdiag.utils.fontmap import FontMap, parse_fontpath
 from blockdiag.utils.myitertools import istep, stepslice
-
 
 def point_pairs(xylist):
     iterable = iter(xylist)
@@ -147,7 +150,8 @@ class ImageDrawExBase(base.ImageDraw):
         self.draw = ImageDraw.Draw(self._image)
 
     def resizeCanvas(self, size):
-        self._image = self._image.resize(size, Image.ANTIALIAS)
+        #self._image = self._image.resize(size, Image.ANTIALIAS)
+        self._image = self._image.resize(size, Image.BICUBIC)
         self.draw = ImageDraw.Draw(self._image)
 
     def arc(self, box, start, end, **kwargs):
@@ -272,6 +276,8 @@ class ImageDrawExBase(base.ImageDraw):
     @memoize
     def textlinesize(self, string, font):
         ttfont = ttfont_for(font)
+        #info(f"{font.path=} {font.name=} {string=}")
+        
         if ttfont is None:
             if hasattr(self.draw,"textbbox"):
                 size=self.draw.textbbox((0,0), string, font=None)[2:]
@@ -282,8 +288,13 @@ class ImageDrawExBase(base.ImageDraw):
             size = Size(int(size[0] * font_ratio),
                         int(size[1] * font_ratio))
         else:
-            size = Size(*ttfont.getsize(string))
-
+            #info(f"{ttfont.getbbox(string)=} {ttfont.getlength(string)=} {ttfont.getmetrics()}")            
+            #size = Size(*ttfont.getsize(string))#Size(width,height)
+            l,b,r,t=ttfont.getbbox(string)
+            size = Size(r-l,t-b) #Size(width,height)
+            # size = Size( ttfont.getlength(string),
+            #              ttfont.getmetrics()[0]
+            #             )
         return size
 
     def text(self, xy, string, font, **kwargs):
@@ -302,11 +313,15 @@ class ImageDrawExBase(base.ImageDraw):
 
                 basesize = (size[0] * self.scale_ratio,
                             size[1] * self.scale_ratio)
-                text_image = image.resize(basesize, Image.ANTIALIAS)
+                #text_image = image.resize(basesize, Image.ANTIALIAS)
+                text_image = image.resize(basesize, Image.BICUBIC)
                 self.paste(text_image, xy, text_image)
         else:
-            size = ttfont.getsize(string)
-
+            #size = ttfont.getsize(string)
+            l,b,r,t=ttfont.getbbox(string)
+            size = Size(r-l,t-b)
+            #info(f"{ttfont.getbbox(string)=}")
+            
             # Generate mask to support BDF(bitmap font)
             mask = Image.new('1', size)
             draw = ImageDraw.Draw(mask)
@@ -373,7 +388,8 @@ class ImageDrawExBase(base.ImageDraw):
             # resize image.
             w = min([box.width, image.size[0] * self.scale_ratio])
             h = min([box.height, image.size[1] * self.scale_ratio])
-            image.thumbnail((w, h), Image.ANTIALIAS)
+            #image.thumbnail((w, h), Image.ANTIALIAS)
+            image.thumbnail((w, h), Image.BICUBIC)
 
             # centering image.
             w, h = image.size
@@ -407,7 +423,8 @@ class ImageDrawExBase(base.ImageDraw):
             y = int(self._image.size[1] / self.scale_ratio)
             size = (x, y)
 
-        self._image.thumbnail(size, Image.ANTIALIAS)
+        # self._image.thumbnail(size, Image.ANTIALIAS)
+        self._image.thumbnail(size, Image.BICUBIC)
 
         if self.filename:
             self._image.save(self.filename, _format)
@@ -481,7 +498,8 @@ class ImageDrawEx(ImageDrawExBase):
     def polygon(self, xy, **kwargs):
         super(ImageDrawEx, self).polygon(xy, **kwargs)
 
-
+# 
 def setup(self):
     from blockdiag.imagedraw import install_imagedrawer
     install_imagedrawer('png', ImageDrawEx)
+    install_imagedrawer('PNG', ImageDrawEx)
